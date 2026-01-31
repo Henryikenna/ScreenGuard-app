@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -37,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   bool _hasPermission = false;
   bool _isActive = false;
+  int _delaySeconds = 5;
+  int? _countdown;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -48,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _countdownTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -71,8 +77,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _checkStatus() async {
     try {
-      final hasPermission =
-          await _channel.invokeMethod<bool>('checkOverlayPermission');
+      final hasPermission = await _channel.invokeMethod<bool>(
+        'checkOverlayPermission',
+      );
       final isActive = await _channel.invokeMethod<bool>('isOverlayActive');
       setState(() {
         _hasPermission = hasPermission ?? false;
@@ -87,29 +94,75 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _channel.invokeMethod('requestOverlayPermission');
   }
 
-  Future<void> _toggleOverlay() async {
-    if (!_hasPermission) {
-      _requestPermission();
-      return;
-    }
-    try {
-      if (_isActive) {
-        await _channel.invokeMethod('stopOverlay');
-      } else {
-        await _channel.invokeMethod('startOverlay');
+  void _startCountdown() {
+    setState(() {
+      _countdown = _delaySeconds;
+    });
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _countdown = _countdown! - 1;
+      });
+      if (_countdown! <= 0) {
+        timer.cancel();
+        _countdownTimer = null;
+        _activateOverlay();
       }
+    });
+  }
+
+  void _cancelCountdown() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    setState(() {
+      _countdown = null;
+    });
+  }
+
+  Future<void> _activateOverlay() async {
+    setState(() {
+      _countdown = null;
+    });
+    try {
+      await _channel.invokeMethod('startOverlay');
     } on PlatformException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message ?? 'Failed to toggle overlay')),
+          SnackBar(content: Text(e.message ?? 'Failed to start overlay')),
         );
       }
     }
     await _checkStatus();
   }
 
+  Future<void> _toggleOverlay() async {
+    if (!_hasPermission) {
+      _requestPermission();
+      return;
+    }
+    if (_countdown != null) {
+      _cancelCountdown();
+      return;
+    }
+    if (_isActive) {
+      try {
+        await _channel.invokeMethod('stopOverlay');
+      } on PlatformException catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message ?? 'Failed to stop overlay')),
+          );
+        }
+      }
+      await _checkStatus();
+    } else {
+      _startCountdown();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isCounting = _countdown != null;
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -125,15 +178,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Text(
                 'ScreenGuard',
                 style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Lock your screen, keep audio playing',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white60,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: Colors.white60),
               ),
               const SizedBox(height: 48),
               _StatusRow(
@@ -149,9 +202,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _StatusRow(
                 icon: _isActive ? Icons.lock : Icons.lock_open,
                 color: _isActive ? Colors.green : Colors.grey,
-                label: _isActive ? 'Screen lock active' : 'Screen lock inactive',
+                label: _isActive
+                    ? 'Screen lock active'
+                    : 'Screen lock inactive',
               ),
-              const SizedBox(height: 48),
+              const SizedBox(height: 24),
+              // Delay selector
+              if (!_isActive && !isCounting)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Delay: ',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                      ToggleButtons(
+                        isSelected: [_delaySeconds == 5, _delaySeconds == 10],
+                        onPressed: (index) {
+                          setState(() {
+                            _delaySeconds = index == 0 ? 5 : 10;
+                          });
+                        },
+
+                        borderRadius: BorderRadius.circular(8),
+                        selectedColor: Colors.white,
+                        fillColor: Colors.indigo,
+                        children: const [
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Text('5s'),
+                          ),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: Text('10s'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 24),
+              // Toggle button
               SizedBox(
                 width: 200,
                 height: 200,
@@ -159,38 +252,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   onPressed: _toggleOverlay,
                   style: ElevatedButton.styleFrom(
                     shape: const CircleBorder(),
-                    backgroundColor: _isActive ? Colors.red : Colors.indigo,
+                    backgroundColor: _isActive
+                        ? Colors.red
+                        : isCounting
+                        ? Colors.orange
+                        : Colors.indigo,
                     foregroundColor: Colors.white,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        _isActive ? Icons.stop : Icons.play_arrow,
-                        size: 64,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _isActive ? 'STOP' : 'START',
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                      if (isCounting) ...[
+                        Text(
+                          '$_countdown',
+                          style: const TextStyle(
+                            fontSize: 64,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'TAP TO CANCEL',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ] else ...[
+                        Icon(
+                          _isActive ? Icons.stop : Icons.play_arrow,
+                          size: 64,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _isActive ? 'STOP' : 'START',
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              if (isCounting)
+                Text(
+                  'Switch to your app now!',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Text(
                   'U-shape swipe to unlock\n'
                   'Or tap emergency text 20x within 5 seconds',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white38,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white38),
                 ),
               ),
             ],
@@ -226,10 +347,7 @@ class _StatusRow extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(child: Text(label)),
           if (actionLabel != null)
-            TextButton(
-              onPressed: onAction,
-              child: Text(actionLabel!),
-            ),
+            TextButton(onPressed: onAction, child: Text(actionLabel!)),
         ],
       ),
     );

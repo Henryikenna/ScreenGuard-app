@@ -1,11 +1,11 @@
 package com.example.screenguard
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.*
-import android.os.Handler
-import android.os.Looper
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 
 class OverlayView(
     context: Context,
@@ -13,7 +13,7 @@ class OverlayView(
 ) : View(context) {
 
     private val bgPaint = Paint().apply {
-        color = Color.argb(200, 0, 0, 0)
+        color = Color.argb(160, 0, 0, 0)
         style = Paint.Style.FILL
     }
 
@@ -63,19 +63,22 @@ class OverlayView(
     private var lastEmergencyTapTime = 0L
     private val emergencyTimeoutMs = 5000L
     private val emergencyTapsRequired = 20
-    private var emergencyTextVisible = true
-    private val blinkHandler = Handler(Looper.getMainLooper())
-    private val blinkRunnable = object : Runnable {
-        override fun run() {
-            emergencyTextVisible = !emergencyTextVisible
-            invalidate()
-            blinkHandler.postDelayed(this, 500)
-        }
-    }
+    private var emergencyTextAlpha = 255
     private val emergencyTapRegion = RectF()
 
+    private val fadeAnimator = ValueAnimator.ofInt(255, 40).apply {
+        duration = 1200
+        repeatMode = ValueAnimator.REVERSE
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = AccelerateDecelerateInterpolator()
+        addUpdateListener { anim ->
+            emergencyTextAlpha = anim.animatedValue as Int
+            invalidate()
+        }
+    }
+
     init {
-        blinkHandler.post(blinkRunnable)
+        fadeAnimator.start()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -112,15 +115,14 @@ class OverlayView(
             canvas.drawPath(gestureTrailPath, gestureTrailPaint)
         }
 
-        // Emergency exit text (blinking)
-        if (emergencyTextVisible) {
-            emergencyTextPaint.textSize = 24f
-            canvas.drawText(
-                "Tap on this text 20 times to emergency exit",
-                w / 2, h * 0.93f,
-                emergencyTextPaint
-            )
-        }
+        // Emergency exit text (smooth fade)
+        emergencyTextPaint.alpha = emergencyTextAlpha
+        emergencyTextPaint.textSize = 24f
+        canvas.drawText(
+            "Tap on this text 20 times to emergency exit",
+            w / 2, h * 0.93f,
+            emergencyTextPaint
+        )
         if (emergencyTapCount > 0) {
             emergencyTextPaint.textSize = 20f
             canvas.drawText(
@@ -219,6 +221,6 @@ class OverlayView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        blinkHandler.removeCallbacks(blinkRunnable)
+        fadeAnimator.cancel()
     }
 }
