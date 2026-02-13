@@ -1,4 +1,4 @@
-package com.example.screenguard
+package com.screenguard.app
 
 class UShapeGestureDetector {
 

@@ -1,4 +1,4 @@
-package com.example.screenguard
+package com.screenguard.app
 
 import android.content.Intent
 import android.net.Uri
@@ -10,7 +10,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
 
     companion object {
-        private const val CHANNEL = "com.example.screenguard/overlay"
+        private const val CHANNEL = "com.screenguard.app/overlay"
         private const val OVERLAY_PERMISSION_REQUEST_CODE = 1234
     }
 

@@ -1,4 +1,4 @@
-package com.example.screenguard
+package com.screenguard.app
 
 import android.animation.ValueAnimator
 import android.content.Context
